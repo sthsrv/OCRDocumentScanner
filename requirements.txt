@@ -1,0 +1,5 @@
+# Python 3.12 recommended for PaddlePaddle macOS CPU wheels.
+PyMuPDF>=1.24,<2
+paddleocr>=3.0,<4
+paddlepaddle>=3.0,<4
+numpy>=1.26
