@@ -10,7 +10,8 @@ import pymupdf
 from .models import Line
 
 MIN_AREA = 0.03  # share of the page; smaller blobs are icons, logos, rules
-MAX_ASPECT = 5   # wider or taller blobs are bars and dividers, not screenshots
+MAX_ASPECT = 5   # wider or taller blobs are bars and dividers, not screenshots ...
+DARK = 80        # ... unless they are this dark (mean grey, 0 black to 255 white): a terminal capture, not a coloured title bar
 CROP_PAD = 4     # points of margin around a crop, so a few pixels of detection error do not cut the picture
 CROP_ZOOM = 2    # render scale of a crop
 
@@ -41,9 +42,13 @@ def scanned(page) -> list[tuple]:
     count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
     found = []
     for x, y, w, h, _ in stats[1:count]:
-        if w * h >= MIN_AREA * pix.width * pix.height and max(w / h, h / w) <= MAX_ASPECT:
-            top, bottom = _extend(gray, x, y, w, h)
-            found.append((x, top, x + w, bottom))
+        if w * h < MIN_AREA * pix.width * pix.height:
+            continue
+        # shortcut: a black title bar would be taken for a terminal capture; raise the check if one shows up
+        if max(w / h, h / w) > MAX_ASPECT and gray[y:y + h, x:x + w].mean() >= DARK:
+            continue
+        top, bottom = _extend(gray, x, y, w, h)
+        found.append((x, top, x + w, bottom))
     return found
 
 

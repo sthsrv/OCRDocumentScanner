@@ -52,6 +52,8 @@ def code(lines: list[Line]) -> str:
 def render(key: str, blocks: list[list[Line]], right: float):
     blocks = [b for b in blocks if b]
     kind = KIND[key]
+    if kind == "image":
+        return ""
     if kind == "list":  # OCR reads the bullet glyph as stray punctuation, so strip any leading symbols
         return [t for b in blocks for l in b if (t := re.sub(r"^[\W_]+", "", l.text).strip())]
     if kind == "scalar":

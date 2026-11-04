@@ -3,6 +3,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pymupdf
 import pytest
 
@@ -133,6 +134,70 @@ def test_unread_port_value_is_not_filled_from_the_next_line(tmp_path, capsys):
     convert_pdf(pdf, out, ocr=NoOCR())
     assert json.loads((out / "port.json").read_text())["findings"][0]["port"] == ""
     assert "fit no field" in capsys.readouterr().err
+
+
+def test_second_report_layout(tmp_path, capsys):
+    """Severity written '5.3 (Medium)', a wrapped title, no 'Vulnerability Type', extra headings,
+    a title bar split by a page break, and a section that ends at 'Further Recommendations'."""
+    from extractor.fields import SEVERITY
+
+    assert SEVERITY.match("5.3（(Medium)")  # a bracket OCR may misread
+    doc = pymupdf.open()
+    _page(doc, [("Executive Summary", 60, 100)])  # headers and footers are found by repeating on 3 pages
+    _page(doc, [
+        ("Findings", 60, 90),
+        ("Public Blob Enumeration", 60, 120), ("5.3 (Medium)", 400, 128), ("Container (db-backups)", 60, 140),
+        ("Description", 60, 200), ("Anonymous listing is allowed.", 60, 220),
+        ("Impact", 60, 260), ("Attackers can list blobs.", 60, 280),
+        ("Recommendation", 60, 320), ("Make it private.", 60, 340),
+        ("Affected System and Endpoint", 60, 380), ("https://acct.blob.example/db", 70, 400),
+        ("Status", 60, 430), ("Not Remediated", 60, 450),
+        ("CVSS:5.3/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N", 60, 480),  # no label
+        ("Steps for Reproduction", 60, 520), ("Open the URL.", 60, 540),
+        ("Evidence", 60, 580), ("text of a screenshot nobody detected", 70, 610),
+        ("References", 60, 650), ("https://docs.example/ref", 70, 670),
+        ("Management Response", 60, 700), ("5.3 (Medium)", 400, 740),  # severity box ends the page ...
+    ])
+    _page(doc, [("Azure SQL Exposed", 60, 100),  # ... and its title starts the next one
+                ("Description", 60, 160), ("SQL is public.", 60, 180),
+                ("Further Recommendations", 60, 250), ("Ignore this text", 60, 270)])
+    pdf = tmp_path / "second.pdf"
+    doc.save(pdf)
+    out = tmp_path / "out"
+    convert_pdf(pdf, out, ocr=NoOCR())
+    first, second = json.loads((out / "second.json").read_text())["findings"]
+
+    assert first["title"] == "Public Blob Enumeration Container (db-backups)"
+    assert first["cvss"] == "CVSS:5.3/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N" and first["status"] == "Not Remediated"
+    assert first["affected_endpoints"] == ["https://acct.blob.example/db"] and first["reference"] == ["https://docs.example/ref"]
+    assert first["impact"] == "Attackers can list blobs." and first["steps_for_reproduction"] == "Open the URL."
+    assert "evidence" not in first and "management_response" not in first  # empty or never wanted
+    assert second["title"] == "Azure SQL Exposed" and second["description"] == "SQL is public."
+    text = (out / "second.json").read_text() + (out / "second.md").read_text()
+    assert "nobody detected" not in text and "Ignore this text" not in text
+    assert "Evidence text on page(s) [2]" in capsys.readouterr().err
+
+
+def test_scanned_page_dark_strip_is_a_screenshot_but_a_coloured_bar_is_not():
+    from extractor import pictures
+
+    img = np.full((842, 595, 3), 255, np.uint8)
+    img[100:175, 54:541] = (50, 20, 50)    # a terminal capture, 487 x 75 pt
+    img[300:375, 54:541] = (245, 166, 35)  # a title bar of exactly the same size
+    page = pymupdf.open().new_page()
+    page.insert_image(page.rect, pixmap=pymupdf.Pixmap(pymupdf.csRGB, 595, 842, img.tobytes(), False))
+    found = pictures.scanned(page)
+    assert len(found) == 1 and found[0][1] < 200
+
+
+def test_result_folder_is_named_after_the_pdf_and_its_date(tmp_path):
+    from extractor.cli import result_folder
+
+    pdf = tmp_path / "My Report.pdf"
+    pdf.write_bytes(b"")
+    folder = result_folder(pdf, Path("outputs"))
+    assert folder.parent == Path("outputs") and folder.name.startswith("My Report_")
+    assert len(folder.name) == len("My Report_") + len("2026-11-04")
 
 
 def test_no_findings_section(tmp_path):

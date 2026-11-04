@@ -19,6 +19,9 @@ def _norm(text: str) -> str:
     return re.sub(r"[\s:]+", "", text).casefold()
 
 
+END_NORM = {_norm(heading) for heading in END}
+
+
 def _is_meta(text: str) -> bool:
     """A 'Vulnerability Type' label or a CVSS vector: what every finding opens with."""
     m = INLINE.match(text) or BARE.match(text)
@@ -29,32 +32,59 @@ def locate(lines: list[Line]) -> tuple[int | None, int | None]:
     """Slice of `lines` between the 'Findings' heading and Conclusion/Appendix.
 
     start is None until the heading is seen, end is None until a closing heading follows.
-    The heading must be followed by a finding, so a table-of-contents entry is skipped.
+    The heading must be followed by a finding (a title bar or its metadata), so a
+    table-of-contents entry is skipped.
     """
     start = next((i + 1 for i, l in enumerate(lines)
-                  if _norm(l.text) == "findings" and any(_is_meta(x.text) for x in lines[i + 1:i + 13])), None)
+                  if _norm(l.text) == "findings"
+                  and any(_is_meta(x.text) or SEVERITY.match(x.text) for x in lines[i + 1:i + 13])), None)
     if start is None:
         return None, None
-    return start, next((i for i in range(start, len(lines)) if _norm(lines[i].text) in END), None)
+    return start, next((i for i in range(start, len(lines)) if _norm(lines[i].text) in END_NORM), None)
+
+
+def _is_field(text: str) -> bool:
+    """A heading, a 'Label: value' line, or a bare CVSS vector / status / port."""
+    return bool(BARE.match(text) or INLINE.match(text) or CVSS.match(text)
+                or any(p.match(text) for p in VALUE.values()))
+
+
+def _near(a: Line, b: Line) -> bool:
+    """b follows a closely enough to be the same block of text, such as a title wrapped over two lines."""
+    return (a.page == b.page and not (a.picture or b.picture)
+            and not (_is_field(a.text) or _is_field(b.text)) and b.y0 - a.y1 < b.y1 - b.y0)
+
+
+def _continues(lines: list[Line], i: int) -> bool:
+    """The line after lines[i] opens the next page and is plain text: where a split bar's title would be."""
+    nxt = lines[i + 1] if i + 1 < len(lines) else None
+    return bool(nxt) and nxt.page != lines[i].page and not nxt.picture and not BARE.match(nxt.text)
 
 
 def _title_bars(lines: list[Line]) -> dict[int, tuple[str | None, int]]:
     """Title bars: {first line index: (title, last line index)}.
 
-    The title has no label; it is the text beside a severity box, right above the metadata.
+    The title has no label; it is the text of the bar that holds a severity box ("Informational
+    (0.0)", "5.3 (Medium)"). A long title wraps, so the bar is the severity line plus the lines
+    next to it. A severity box on its own line is enough; one sharing a line with other text
+    must be followed by the metadata, so a stray "Risk: High (7.5)" in the text is not a bar.
     """
     bars: dict[int, tuple[str | None, int]] = {}
     for i, line in enumerate(lines):
         m = SEVERITY.match(line.text)
-        if not m or not any(_is_meta(x.text) for x in lines[i + 1:i + 5]):
+        if not m or (m["title"].strip() and not any(_is_meta(x.text) for x in lines[i + 1:i + 5])):
             continue
-        prev = lines[i - 1] if i else None
-        if m["title"].strip():
-            bars[i] = (m["title"].strip(), i)
-        elif prev and not prev.picture and abs(prev.y0 - line.y0) < line.y1 - line.y0:
-            bars[i - 1] = (prev.text, i)
-        else:
-            bars[i] = (None, i)  # no title text found: falls back to the vulnerability type
+        first, last = i, i
+        while first and _near(lines[first - 1], lines[first]):
+            first -= 1
+        while last + 1 < len(lines) and _near(lines[last], lines[last + 1]):
+            last += 1
+        if first == last and not m["title"].strip() and _continues(lines, last):  # a page break split the bar
+            last += 1
+            while last + 1 < len(lines) and _near(lines[last], lines[last + 1]):
+                last += 1
+        texts = [(m["title"] if j == i else lines[j].text).strip() for j in range(first, last + 1)]
+        bars[first] = (" ".join(t for t in texts if t) or None, last)  # no text: falls back to the vulnerability type
     return bars
 
 

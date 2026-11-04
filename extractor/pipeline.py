@@ -46,6 +46,10 @@ def convert_pdf(pdf: Path, out_dir: Path, formats=("md", "json"), ocr=None, min_
             where = sorted({l.page for l in dropped})
             print(f"Warning: {len(dropped)} line(s) on page(s) {where} fit no field, so they were left out; "
                   "a heading was probably misread by OCR.", file=sys.stderr)
+        missed = sorted({l.page for f in findings for b in f.blocks.get("evidence", []) for l in b})
+        if missed:  # a detected screenshot takes its own text with it, so text left here means it was not detected
+            print(f"Warning: Evidence text on page(s) {missed} was left out, but no screenshot was found "
+                  "there, so nothing was cropped; check those pages.", file=sys.stderr)
         right = max((l.x1 for l in section if not l.picture), default=0)
         out_dir.mkdir(parents=True, exist_ok=True)
         wanted = {n for f in findings for n in f.picture_pages}

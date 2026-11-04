@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .fields import KIND, ORDER, TITLES
+from .fields import KIND, OPTIONAL, ORDER, TITLES
 from .markdown import render
 from .parser import Finding
 
@@ -15,8 +15,9 @@ def image_name(page: int) -> str:
 
 def finding_dict(finding: Finding, right: float) -> dict:
     values = {key: render(key, finding.blocks.get(key, []), right) for key in ORDER}
-    if not values["evidence"]:  # only shown when the report has a text Evidence section
-        del values["evidence"]
+    for key in OPTIONAL:  # sections only some reports have
+        if not values[key]:
+            del values[key]
     return {
         "title": finding.title or values["vulnerability_type"] or None,
         **values,
