@@ -1,6 +1,6 @@
 # Findings Extractor
 
-Reads a vulnerability-report PDF and writes only what is under its **Findings** heading, as JSON and Markdown. Pages with a text layer are read directly; scanned pages go through PaddleOCR. Findings pages that contain screenshots are saved as PNGs.
+Reads a vulnerability-report PDF and writes only what is under its **Findings** heading, as JSON and Markdown. Pages with a text layer are read directly; scanned pages go through PaddleOCR. Screenshots on findings pages are cropped out and saved as PNGs.
 
 ## Setup
 
@@ -28,7 +28,7 @@ Each finding has `title` (the unlabeled bar above the metadata; falls back to th
 
 A value whose label is missing is still recognised when its shape is unambiguous: a CVSS vector (`CVSS:3.1/AV:N/...`), a status word (`Resolved`, `Wont Fix`, ...) or a bare port number.
 
-The Markdown file has one `###` title per finding, followed by `Label: value` lines. Header, footer, page headings and anything inside a screenshot are left out of both files. `images/page-NNNN.png` holds each findings page that contains a screenshot, and `image_pages` in the JSON says which finding it belongs to.
+The Markdown file has one `###` title per finding, followed by `Label: value` lines. Header, footer, page headings and anything inside a screenshot are left out of both files. Each screenshot on a findings page is cropped out of the page and saved as `images/page-NNNN.png` (`page-NNNN-1.png`, `page-NNNN-2.png`, ... when a page has several, top to bottom). `image_pages` in the JSON lists the files that belong to each finding.
 
 ## Where to change things
 
@@ -38,7 +38,7 @@ The Markdown file has one `###` title per finding, followed by `Label: value` li
 | How a field is written (Markdown, lists, code blocks) | `extractor/markdown.py` |
 | JSON / Markdown layout | `extractor/writers.py` |
 | Header and footer bands | `extractor/margins.py` |
-| Screenshot detection | `extractor/pictures.py` |
+| Screenshot detection and cropping (padding `CROP_PAD`, scale `CROP_ZOOM`) | `extractor/pictures.py` |
 | OCR engine and render scale | `extractor/ocr.py`, `ZOOM` in `extractor/pages.py` |
 | Finding boundaries and field assignment | `extractor/parser.py` |
 
@@ -48,4 +48,5 @@ The Markdown file has one `###` title per finding, followed by `Label: value` li
 - On scanned pages, screenshots are found by their dark or coloured areas. A mostly white, light-themed screenshot may be missed. On text-layer pages embedded images are used, which is exact.
 - Header and footer removal assumes they sit in the top 7% and bottom 10% of the page.
 - Bullets read by OCR as stray punctuation are cleaned from list fields only.
+- A crop is the detected rectangle plus 4 points of padding. If one is cut short or includes too much, raise or lower `CROP_PAD`, or send me that page.
 - A `Port` value must look like a port (`443`, `80, 443`). If the box under the heading was not read, the next line is reported as unplaced instead of being filed as the port.

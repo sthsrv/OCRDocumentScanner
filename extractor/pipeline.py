@@ -11,10 +11,10 @@ from .models import Line, Page
 from .ocr import PaddleReader
 from .pages import load_page
 from .parser import locate, parse_findings
-from .writers import finding_dict, image_name, write_json, write_markdown
+from .pictures import save_crops
+from .writers import finding_dict, write_json, write_markdown
 
 MIN_TEXT_CHARS = 20  # fewer characters than this on a page means it is scanned and needs OCR
-IMAGE_ZOOM = 1.5
 
 
 def _flat(pages: list[Page]) -> list[Line]:
@@ -48,8 +48,11 @@ def convert_pdf(pdf: Path, out_dir: Path, formats=("md", "json"), ocr=None, min_
                   "a heading was probably misread by OCR.", file=sys.stderr)
         right = max((l.x1 for l in section if not l.picture), default=0)
         out_dir.mkdir(parents=True, exist_ok=True)
-        _save_image_pages(doc, sorted({n for f in findings for n in f.picture_pages}), out_dir)
+        wanted = {n for f in findings for n in f.picture_pages}
+        crops = save_crops(doc, [l for l in section if l.picture and l.page in wanted], out_dir / "images")
     items = [finding_dict(f, right) for f in findings]
+    for item, f in zip(items, findings):  # file names of the crops, not the whole-page names writers.py builds
+        item["image_pages"] = [name for n in f.picture_pages for name in crops[n]]
     outputs = {}
     if "json" in formats:
         outputs["json"] = out_dir / f"{pdf.stem}.json"
@@ -58,15 +61,3 @@ def convert_pdf(pdf: Path, out_dir: Path, formats=("md", "json"), ocr=None, min_
         outputs["md"] = out_dir / f"{pdf.stem}.md"
         write_markdown(items, outputs["md"])
     return outputs
-
-
-def _save_image_pages(doc, numbers: list[int], out_dir: Path) -> None:
-    """Whole-page PNGs of the findings pages that hold screenshots."""
-    image_dir = out_dir / "images"
-    for old in image_dir.glob("page-*.png"):  # leftovers from an earlier run
-        old.unlink()
-    for n in numbers:
-        image_dir.mkdir(exist_ok=True)
-        doc[n - 1].get_pixmap(matrix=pymupdf.Matrix(IMAGE_ZOOM, IMAGE_ZOOM), alpha=False).save(
-            out_dir / image_name(n)
-        )

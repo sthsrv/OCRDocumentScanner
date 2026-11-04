@@ -85,6 +85,25 @@ def test_findings_extracted(report, tmp_path):
 
     # only the findings page with a screenshot is saved; the one after Conclusion is not
     assert sorted(p.name for p in (out / "images").iterdir()) == ["page-0003.png"]
+    crop = pymupdf.Pixmap(out / "images" / "page-0003.png")  # the 340x170 pt image plus padding, not the 595x842 page
+    assert (crop.width, crop.height) == pytest.approx((696, 356), abs=6)
+
+
+def test_page_with_two_screenshots_gives_two_numbered_crops(tmp_path):
+    doc = pymupdf.open()
+    _page(doc, [("Findings", 60, 90), ("Redirect", 60, 120), ("Low (3.1)", 400, 120), (VECTOR, 60, 150),
+                ("Vulnerability Type: Redirect", 60, 170), ("Remarks", 60, 200)], image=True)
+    blue = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 200, 100), False)
+    blue.set_rect(blue.irect, (30, 60, 200))
+    doc[0].insert_image(pymupdf.Rect(60, 450, 300, 570), pixmap=blue)  # second screenshot, below the first
+    _page(doc, [("Conclusion", 60, 90)])
+    pdf = tmp_path / "two.pdf"
+    doc.save(pdf)
+    out = tmp_path / "out"
+    convert_pdf(pdf, out, ocr=NoOCR())
+    names = ["images/page-0001-1.png", "images/page-0001-2.png"]
+    assert json.loads((out / "two.json").read_text())["findings"][0]["image_pages"] == names
+    assert all((out / n).is_file() for n in names)
 
 
 def test_nothing_else_leaks(report, tmp_path):
