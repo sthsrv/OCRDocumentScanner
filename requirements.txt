@@ -3,3 +3,5 @@ PyMuPDF>=1.24,<2
 paddleocr>=3.0,<4
 paddlepaddle>=3.0,<4
 numpy>=1.26
+# cv2 (OpenCV) comes in with paddleocr; pytest is only for tests/
+pytest
