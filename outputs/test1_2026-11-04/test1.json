@@ -1,0 +1,98 @@
+{
+  "findings": [
+    {
+      "title": "Public Blob Enumeration Enabled on Azure Storage Container (db-backups)",
+      "vulnerability_type": "",
+      "cvss": "CVSS:5.3/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "status": "Not Remediated",
+      "affected_endpoints": [
+        "https://koilidpsprodstorage.blob.core.windows.net/db-backups/"
+      ],
+      "scopes": [],
+      "description": "Public blob enumeration vulnerabilities occur when an Azure Storage container allows unauthenticated users to list blob names, metadata, or properties. Even if the storage container does not permit downloading the actual blob content, exposing blob metadata can leak sensitive information such as file names, timestamps, internal naming conventions, and operational details.\n\nIn the assessed Azure environment, the storage container “db-backups” was found to allow public enumeration of blobs. Anyone with the container URL can list blob names and their metadata without authentication. Although the blob content was not exposed, this misconfiguration increases reconnaissance capability for attackers and may lead to future data exposure if real backups are uploaded without correcting permissions.",
+      "port": "",
+      "recommendation": "Disable all public access to the Azure Storage account and set the container access level to Private.\nAllow blob access only through Azure AD, SAS tokens, or Managed Identity with strict permissions.",
+      "reference": [],
+      "remarks": "",
+      "output": "",
+      "impact": "An attacker can exploit this vulnerability to:\nEnumerate blob names, timestamps, sizes, and metadata without authentication.\nObtain internal naming patterns, backup schedules, and file structure.\nPerform targeted phishing or social-engineering attacks based on discovered filenames.\n- Gain insight for future attacks (e.g., backup tampering if permissions change).\n\nAlthough the content itself is not downloadable, metadata exposure qualifies as an information disclosure risk.",
+      "steps_for_reproduction": "Visit: https://koilidpsprodstorage.blob.core.windows.net/db-\nbackups?restype=container&comp=liston yourbrowser.\nObserve that blob names and metadata are publicly visible without authentication.\nConfirm that the container is misconfigured by verifyingthe XML output displays blob listings.",
+      "image_pages": []
+    },
+    {
+      "title": "Publicly Accessible Azure Service Bus",
+      "vulnerability_type": "",
+      "cvss": "CVSS:5.3/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "status": "Not Remediated",
+      "affected_endpoints": [
+        "https://koili-dev.servicebus.windows.net/",
+        "https://koili-staging.servicebus.windows.net/",
+        "https://koili-prod.servicebus.windows.net/"
+      ],
+      "scopes": [],
+      "description": "Azure Service Bus namespaces should be protected behind network restrictions\n(Private Endpoints, VNet integration, IP firewall rules). When a namespace is left\npublicly reachable, anyone on the internet can directly query Service Bus\nmanagement endpoints.\n\nDuring assessment, the Service Bus namespace koili-dev/koili-staging/koili-prod responded 200 (ok) to multiple unauthenticated requests sent to its\nmanagement endpoints:\n\n$namespaceinfo\n$Resources/Queues\n$Resources/Topics\n$Resources/Subscriptions\n\nAlthough the namespace currently contains no active queues/topics, the\nnamespace itself is exposed and queryable. This increases attack surface and\nenables reconnaissance on internal resources.",
+      "port": "",
+      "recommendation": "Disable all public access to the Azure Service Bus.\nEnforce strict authentication using:\nAzure AD\nSAS tokens\nManaged Identity",
+      "reference": [
+        "https://learn.microsoft.com/en-us/azure/service-bus-messaging/service-",
+        "bus-ip-filtering"
+      ],
+      "remarks": "",
+      "output": "",
+      "impact": "A publicly reachable Service Bus namespace allows an attacker to:\nDiscover and enumerate the namespace using unauthenticated requests. Probe internal management endpoints, confirming service status and structure.\nFingerprint the environment (API version, service type, XML formats, server behavior).\nPrepare for future exploitation if queues/topics get created later with weak permissions.",
+      "steps_for_reproduction": "Run a public-network scan to check reachability: nmap -Pn -p 567l koili- (dev|staginglprod).servicebus.windows.net\nObserve that port 5671 (AMQP over TLS)is open and responsive from the internet.\nVerify a successful TLS handshake to the AMQP endpoint: openssl s_client – connect koili-(dev|staginglprod).servicebus.windows.net:5671.\nConfirm that no firewall, Private Endpoint, or IP restriction blocks anonymous network access.",
+      "image_pages": [
+        "images/page-0016.png"
+      ]
+    },
+    {
+      "title": "Azure SQL Database Publicly Reachable Over the Internet",
+      "vulnerability_type": "",
+      "cvss": "CVSS:5.3/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "status": "Not Remediated",
+      "affected_endpoints": [
+        "koili-db-prod.database.windows.net",
+        "koili-db-dev.database.windows.net"
+      ],
+      "scopes": [],
+      "description": "Azure SQL Databases should be protected behind network restrictions such as Private Endpoints, VNet integration, and IP firewall rules. When a SQL Database is publicly reachable, anyone on the internet can connect to the SQL endpoint and attempt network-level authentication, enabling password-guessing attacks, credential-stuffing attempts, and broad reconnaissance of the database service.\n\nDuring the assessment, the SQL Database servers koili-db-prod and koili-db-dev were found to be publicly reachable over port 1433 (MS SQL Server) from any external network. No firewall, IP restriction, or network control was in place to prevent unauthenticated access attempts.\n\nAlthough valid credentials are still required to access the databases, this exposure significantly increases the attack surface by allowing attackers to perform reconnaissance, brute-force login attempts, and misuse leaked or weak passwords.",
+      "port": "",
+      "recommendation": "Disable public network access entirely for all Azure SQL Databases.",
+      "reference": [
+        "https://learn.microsoft.com/en-us/azure/azure-sql/database/network-",
+        "access-controls-overview?view=azuresql"
+      ],
+      "remarks": "",
+      "output": "",
+      "impact": "A publicly reachable Azure SQL Database allows an attacker to:\nIdentify SQL Server endpoints, confirming SQL services are running.\nPerform large-scale password brute-force or credential-stuffing attacks.\nProbe TLS handshake and gather server version metadata.\nEnumerate timing responses to guess authentication behavior.\nPrepare for exploitation if weak SQL credentials or outdated configurations exist.\nUse the information for targeted attacks against the organization's cloud assets.",
+      "steps_for_reproduction": "Test public reachability of the SQL endpoint:\nonc -vz koili-db-prod.database.windows.net 1433\nonc -vz koili-db-dev.database.windows.net1433\n\n- Verify that the SQL server accepts TLS connections:\nO\nopenssl s_client -connect koili-db-\nprod.database.windows.net:1433\nO\nopenssl s_client -connect koili-db-\ndev.database.windows.net:1433\n\nConfirm that no firewall, Private Endpoint, or IP restriction blocks anonymous access from the internet.",
+      "image_pages": [
+        "images/page-0018.png"
+      ]
+    },
+    {
+      "title": "Public Network Access Enabled for Azure Key Vault",
+      "vulnerability_type": "",
+      "cvss": "CVSS:5.3/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "status": "Not Remediated",
+      "affected_endpoints": [
+        "koili-keyvault-prod.vault.azure.net"
+      ],
+      "scopes": [],
+      "description": "Azure Key Vaults should be isolated from the public internet. If a Key Vault is reachable publicly, it allows anyone on the internet to attempt connections to the vault endpoint, potentially enabling reconnaissance, token-guessing, or brute- force attacks.\n\nDuring the assessment, the Key Vault koili-keyvault-prod was found to be accessible over the internet at: https://koili-keyvault-prod.vault.azure.net/\n\nNo network restrictions were configured to prevent unauthenticated access attempts. While authentication is still required to read secrets or keys, the public exposure increases the risk of targeted attacks or future misconfigurations being exploited.",
+      "port": "",
+      "recommendation": "Disable public network access for the Key Vault.\nApply firewall rules for limited, controlled access for required networks and applications.",
+      "reference": [
+        "https://learn.microsoft.com/en-us/azure/key-vault/general/network-",
+        "security"
+      ],
+      "remarks": "",
+      "output": "",
+      "impact": "A Key Vault that is reachable publicly can allow an attacker to:\n\nDiscover vault endpoints and confirm the Key Vault service is active.\nAttempt brute-force attacks on tokens or credentials.\nPrepare targeted attacks if vault permissions or secrets are mismanaged.",
+      "steps_for_reproduction": "Check if the Key Vault endpoint is reachable over the internet:\nocurl-ihttps://koili-keyvault-prod.vault.azure.net/secrets?api-\nversion=7.3\nObserve the response to confirm authentication is required.",
+      "image_pages": [
+        "images/page-0020.png"
+      ]
+    }
+  ]
+}
