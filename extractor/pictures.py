@@ -27,29 +27,74 @@ def embedded(page) -> list[tuple]:
 
 
 def scanned(page) -> list[tuple]:
-    """Dark or coloured blobs on a page that is itself a single scanned image.
+    """Find screenshot regions on a page that is itself a single scanned image.
 
-    shortcut: light-themed screenshots (mostly white UI) are not detected; use a layout
-    model such as PaddleOCR's PP-DocLayout if those show up.
+    Dark screenshots are found from connected dark/coloured areas.  A second, lighter
+    pass uses the fine edges and text inside a light UI; this is deliberately more
+    conservative than the dark pass because ordinary page text also produces edges.
     """
     pix = page.get_pixmap(alpha=False)  # 72 dpi: one pixel per point
     rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    found = _dark_candidates(gray)
+    found += _light_candidates(gray, found)
+    return found
+
+
+def _valid_candidate(gray, x, y, w, h) -> bool:
+    page_h, page_w = gray.shape
+    if w * h < MIN_AREA * page_w * page_h:
+        return False
+    if max(w / h, h / w) > MAX_ASPECT and gray[y:y + h, x:x + w].mean() >= DARK:
+        return False
+    # The scanned page itself is not a screenshot.  Leave a small margin for a
+    # screenshot that touches one side, while rejecting the page-sized contour.
+    return w < page_w * 0.97 or h < page_h * 0.97
+
+
+def _dark_candidates(gray):
     mask = (gray < 200).astype(np.uint8) * 255
-    k = max(3, pix.width // 70)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((k, k), np.uint8))  # drops thin text strokes
+    k = max(3, gray.shape[1] // 70)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((k, k), np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3 * k, 3 * k), np.uint8))
     count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
     found = []
     for x, y, w, h, _ in stats[1:count]:
-        if w * h < MIN_AREA * pix.width * pix.height:
-            continue
-        # shortcut: a black title bar would be taken for a terminal capture; raise the check if one shows up
-        if max(w / h, h / w) > MAX_ASPECT and gray[y:y + h, x:x + w].mean() >= DARK:
+        if not _valid_candidate(gray, x, y, w, h):
             continue
         top, bottom = _extend(gray, x, y, w, h)
         found.append((x, top, x + w, bottom))
     return found
+
+
+def _light_candidates(gray, existing):
+    """Find mostly-white screenshots from their border and UI/text edges."""
+    edges = cv2.Canny(gray, 30, 100)
+    k = max(5, gray.shape[1] // 100)
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((k, k), np.uint8))
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8))
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    candidates = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if not _valid_candidate(gray, x, y, w, h):
+            continue
+        # A screenshot has substantially more edge detail than a plain page area.
+        density = cv2.countNonZero(edges[y:y + h, x:x + w]) / (w * h)
+        if density < 0.012:
+            continue
+        rect = (x, y, x + w, y + h)
+        if any(_overlap(rect, old) > 0.5 for old in existing + candidates):
+            continue
+        candidates.append(rect)
+    return candidates
+
+
+def _overlap(a, b):
+    x0, y0 = max(a[0], b[0]), max(a[1], b[1])
+    x1, y1 = min(a[2], b[2]), min(a[3], b[3])
+    intersection = max(0, x1 - x0) * max(0, y1 - y0)
+    return intersection / min(_area(a), _area(b))
 
 
 def _extend(gray, x, y, w, h):
